@@ -145,6 +145,8 @@ def is_neptune_available():
 def is_codecarbon_available():
     return importlib.util.find_spec("codecarbon") is not None
 
+def is_flytekit_available():
+    return importlib.util.find_spec("flytekit") is not None
 
 def hp_params(trial):
     if is_optuna_available():
@@ -552,6 +554,8 @@ def get_available_reporting_integrations():
         integrations.append("codecarbon")
     if is_clearml_available():
         integrations.append("clearml")
+    if is_flytekit_available():
+        integrations.append("flytekit")
     return integrations
 
 
@@ -1531,6 +1535,52 @@ class ClearMLCallback(TrainerCallback):
             artifact_path = os.path.join(args.output_dir, ckpt_dir)
             logger.info(f"Logging checkpoint artifacts in {ckpt_dir}. This may take time.")
             self._clearml_task.update_output_model(artifact_path, iteration=state.global_step, auto_delete_file=False)
+
+class FlyteKitCallback(TrainerCallback):
+    """
+    FlyteKit callback. Adds automatic Checkpointing and logging to the Flyte platform.
+
+    Flyte is a platform for building and deploying scalable, reliable, and reproducible data and ML pipelines at
+    scale. Flyte enables you to define your data and ML pipelines as a DAG of tasks, and then execute them in a
+    distributed manner. Flyte is built on top of Kubernetes and FlyteIDL, a strongly-typed, compiled interface
+    definition language.
+
+    This callback requires `flytekit` to be installed. Please refer to the
+    `installation guide <https://flytecookbook.readthedocs.io/en/latest/auto/core/flyte_basics/install_flytekit.html>`__
+    """
+
+    def __init__(self, epoch=0, checkpoint_all=False):
+        self._epoch = epoch
+        self.checkpoint_all = checkpoint_all
+        self._checkpoint = None
+        self._remote_checkpoint_dir = "_transformers_checkpoints"
+
+    def on_init_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        from flytekit.core.context_manager import FlyteContextManager
+        fa = FlyteContextManager.current_context().file_access
+        if fa.exists(self._remote_checkpoint_dir):
+            local_path = fa.get
+
+    def on_save(self, args, state, control, **kwargs):
+        """
+        This method is called when the checkpoint is saved.
+        We use it as a starting point in the event of a Task failure, so we don't have to start from scratch.
+        """
+        if state.is_world_process_zero:
+            logger.info("Saving model checkpoint to Flyte platform")
+            from flytekit.core.context_manager import FlyteContextManager
+            self._epoch = state.epoch
+            ckpt_dir = f"checkpoint-{state.global_step}"
+            artifact_path = os.path.join(args.output_dir, ckpt_dir)
+            logger.info(f"Logging checkpoint artifacts in {ckpt_dir}. This may take time.")
+
+            ctx = FlyteContextManager.current_context()
+
+            ctx.file_access.put(
+                remote_path= , local_path=artifact_path
+            )
+
+
 
 
 INTEGRATION_TO_CALLBACK = {
